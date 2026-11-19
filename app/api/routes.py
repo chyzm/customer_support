@@ -1,13 +1,17 @@
 from fastapi import APIRouter, Depends
 
-from app.api.deps import get_evaluator, get_policy
+from app.api.deps import enforce_rate_limit, get_evaluator, get_policy
 from app.decision.engine import decide
 from app.decision.policy import DecisionPolicy
 from app.schemas.decision import TriageResult
 from app.schemas.ticket import TicketRequest
 from app.services.jev import TicketEvaluator
 
-router = APIRouter(prefix="/api/v1", tags=["Ticket Triage"])
+router = APIRouter(
+    prefix="/api/v1",
+    tags=["Ticket Triage"],
+    dependencies=[Depends(enforce_rate_limit)],
+)
 
 
 @router.post(

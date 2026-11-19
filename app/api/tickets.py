@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_evaluator, get_policy, get_session
+from app.api.deps import enforce_rate_limit, get_evaluator, get_policy, get_session
 from app.db import repository
 from app.decision.policy import DecisionPolicy
 from app.schemas.decision import Priority
@@ -18,7 +18,11 @@ from app.schemas.ticket import TicketRequest
 from app.services import ticket_service
 from app.services.jev import TicketEvaluator
 
-router = APIRouter(prefix="/api/v1/tickets", tags=["Tickets"])
+router = APIRouter(
+    prefix="/api/v1/tickets",
+    tags=["Tickets"],
+    dependencies=[Depends(enforce_rate_limit)],
+)
 
 
 @router.post(
@@ -102,7 +106,7 @@ async def retry_triage(
     "/{ticket_id}/review",
     response_model=TicketDetail,
     summary="Confirm or correct the AI decision",
-    description="Send only `reviewer` to confirm. Add queue / priority / escalate to correct.",
+    description="Send only `reviewer` to preserve the current decision. Add queue / priority / escalate to correct.",
 )
 async def review_ticket(
     ticket_id: int,

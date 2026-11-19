@@ -46,8 +46,9 @@ class TicketSummary(BaseModel):
 class ReviewRequest(BaseModel):
     """A person's verdict on the AI decision.
 
-    Send nothing but `reviewer` to confirm. Send any of queue / priority /
-    escalate to correct them. Fields left out keep the AI's value.
+    Send nothing but `reviewer` to confirm the current effective decision. Send
+    any of queue / priority / escalate to correct them. Fields left out preserve
+    the ticket's current values, including an earlier human correction.
     """
 
     reviewer: str = Field(min_length=1, max_length=100)

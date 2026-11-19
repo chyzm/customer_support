@@ -103,5 +103,12 @@ def test_live_mode_without_key_fails_fast():
 
 
 def test_api_key_is_masked_in_repr():
-    settings = Settings(_env_file=None, jev_mode="live", typesafe_api_key="sk-super-secret")
+    settings = Settings(
+        _env_file=None,
+        jev_mode="live",
+        typesafe_api_key="sk-super-secret",
+        api_auth_enabled=True,
+        client_api_keys="test:client-super-secret",
+    )
     assert "sk-super-secret" not in repr(settings)
+    assert "client-super-secret" not in repr(settings)

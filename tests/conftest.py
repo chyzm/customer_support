@@ -4,6 +4,8 @@ import os
 # so tests never touch the real triage.db and never need a TypeSafe key.
 os.environ["JEV_MODE"] = "mock"
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+os.environ["API_AUTH_ENABLED"] = "false"
+os.environ["RATE_LIMIT_REQUESTS"] = "1000"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

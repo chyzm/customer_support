@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.models import Ticket
+from app.db.models import DecisionRecord, EvaluationRecord, ReviewRecord, Ticket
 
 
 async def get_ticket(session: AsyncSession, ticket_id: int) -> Ticket | None:
@@ -59,3 +59,69 @@ async def list_tickets(
         .offset(offset)
     )
     return list(rows), total or 0
+
+
+async def count_grouped(session: AsyncSession, column) -> dict[str, int]:
+    """Count non-null values of a Ticket column."""
+    rows = await session.execute(
+        select(column, func.count()).where(column.is_not(None)).group_by(column)
+    )
+    return {str(value): count for value, count in rows.all()}
+
+
+async def analytics_counts(session: AsyncSession) -> dict[str, object]:
+    total_tickets = await session.scalar(select(func.count()).select_from(Ticket)) or 0
+    decisions = await session.scalar(select(func.count()).select_from(DecisionRecord)) or 0
+
+    # One decision can have multiple audit reviews. Analytics uses only the latest
+    # review for each decision so frequently reviewed tickets are not overweighted.
+    latest = (
+        select(ReviewRecord.decision_id, func.max(ReviewRecord.id).label("review_id"))
+        .group_by(ReviewRecord.decision_id)
+        .subquery()
+    )
+    reviewed_decisions = await session.scalar(select(func.count()).select_from(latest)) or 0
+    corrected_decisions = await session.scalar(
+        select(func.count())
+        .select_from(ReviewRecord)
+        .join(latest, ReviewRecord.id == latest.c.review_id)
+        .where(ReviewRecord.agreed.is_(False))
+    ) or 0
+
+    return {
+        "total_tickets": total_tickets,
+        "status_counts": await count_grouped(session, Ticket.status),
+        "triage_state_counts": await count_grouped(session, Ticket.triage_state),
+        "priority_counts": await count_grouped(session, Ticket.priority),
+        "queue_counts": await count_grouped(session, Ticket.queue),
+        "decisions": decisions,
+        "reviewed_decisions": reviewed_decisions,
+        "corrected_decisions": corrected_decisions,
+    }
+
+
+async def latest_review_labels(
+    session: AsyncSession,
+    *,
+    model: str | None = None,
+    policy_version: str | None = None,
+) -> list[tuple[ReviewRecord, DecisionRecord, EvaluationRecord]]:
+    """Return one (latest) human label per decision, optionally stratified."""
+    latest = (
+        select(ReviewRecord.decision_id, func.max(ReviewRecord.id).label("review_id"))
+        .group_by(ReviewRecord.decision_id)
+        .subquery()
+    )
+    statement = (
+        select(ReviewRecord, DecisionRecord, EvaluationRecord)
+        .join(latest, ReviewRecord.id == latest.c.review_id)
+        .join(DecisionRecord, ReviewRecord.decision_id == DecisionRecord.id)
+        .join(EvaluationRecord, DecisionRecord.evaluation_id == EvaluationRecord.id)
+        .order_by(ReviewRecord.id)
+    )
+    if model is not None:
+        statement = statement.where(EvaluationRecord.model == model)
+    if policy_version is not None:
+        statement = statement.where(DecisionRecord.policy_version == policy_version)
+    result = await session.execute(statement)
+    return list(result.all())

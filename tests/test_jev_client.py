@@ -45,7 +45,15 @@ GOOD_BODY = {
 
 
 def make_client(handler) -> JevClient:
-    settings = Settings(_env_file=None, jev_mode="live", typesafe_api_key=FAKE_KEY)
+    settings = Settings(
+        _env_file=None,
+        jev_mode="live",
+        typesafe_api_key=FAKE_KEY,
+        api_auth_enabled=True,
+        client_api_keys="test-client:inbound-test-key",
+        jev_retry_base_seconds=0,
+        jev_retry_max_seconds=0,
+    )
     http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     return JevClient(settings, http)
 
@@ -99,11 +107,16 @@ async def test_status_codes_map_to_domain_errors(status, expected):
 
 
 async def test_timeout_is_unavailable():
+    calls = 0
+
     def handler(request):
+        nonlocal calls
+        calls += 1
         raise httpx.ReadTimeout("slow", request=request)
 
     with pytest.raises(JevUnavailableError):
         await make_client(handler).evaluate_ticket("Subject here", "A long enough message body.")
+    assert calls == 3
 
 
 async def test_missing_answer_is_response_error():
@@ -117,3 +130,89 @@ async def test_non_json_body_is_response_error():
     client = make_client(lambda request: httpx.Response(200, text="<html>oops</html>"))
     with pytest.raises(JevResponseError):
         await client.evaluate_ticket("Subject here", "A long enough message body.")
+
+
+async def test_retryable_status_eventually_succeeds():
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(429 if calls == 1 else 200, json={} if calls == 1 else GOOD_BODY)
+
+    result = await make_client(handler).evaluate_ticket("Subject here", "A long enough message body.")
+    assert result.model == "jev-1.14.0"
+    assert calls == 2
+
+
+async def test_non_retryable_status_is_attempted_once():
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(401)
+
+    with pytest.raises(JevAuthError):
+        await make_client(handler).evaluate_ticket("Subject here", "A long enough message body.")
+    assert calls == 1
+
+
+async def test_retryable_status_is_bounded_by_max_attempts():
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(503)
+
+    with pytest.raises(JevUpstreamError):
+        await make_client(handler).evaluate_ticket("Subject here", "A long enough message body.")
+    assert calls == 3
+
+
+async def test_retry_after_is_honored_but_capped():
+    sleeps = []
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            429 if calls == 1 else 200,
+            headers={"Retry-After": "9"},
+            json={} if calls == 1 else GOOD_BODY,
+        )
+
+    settings = Settings(
+        _env_file=None,
+        jev_mode="live",
+        typesafe_api_key=FAKE_KEY,
+        api_auth_enabled=True,
+        client_api_keys="test:inbound",
+        jev_retry_base_seconds=0.1,
+        jev_retry_max_seconds=0.5,
+    )
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    async def record_sleep(seconds):
+        sleeps.append(seconds)
+
+    result = await JevClient(settings, http, sleep=record_sleep).evaluate_ticket(
+        "Subject here", "A long enough message body."
+    )
+    assert result.model == "jev-1.14.0"
+    assert sleeps == [0.5]
+
+
+async def test_invalid_success_response_is_not_retried():
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, text="not json")
+
+    with pytest.raises(JevResponseError):
+        await make_client(handler).evaluate_ticket("Subject here", "A long enough message body.")
+    assert calls == 1

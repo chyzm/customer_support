@@ -128,10 +128,13 @@ async def record_review(
     if review.queue is not None and review.queue not in valid_queues:
         raise InvalidReviewError(f"Unknown queue '{review.queue}'. Valid: {sorted(valid_queues)}")
 
-    # Unspecified fields keep the AI's value, so each row holds the complete final answer.
-    final_queue = review.queue if review.queue is not None else decision.queue
-    final_priority = review.priority.value if review.priority is not None else decision.priority
-    final_escalate = review.escalate if review.escalate is not None else decision.escalate
+    # Unspecified fields preserve the ticket's current effective values. On a first
+    # review those are the AI values; on a later review they may include an earlier
+    # human correction. Older reviews remain audit history, while calibration uses
+    # only the latest review for each decision.
+    final_queue = review.queue if review.queue is not None else ticket.queue
+    final_priority = review.priority.value if review.priority is not None else ticket.priority
+    final_escalate = review.escalate if review.escalate is not None else ticket.escalated
 
     agreed = (
         final_queue == decision.queue
