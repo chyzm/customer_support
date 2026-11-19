@@ -1,0 +1,4 @@
+{
+  "subject": "Payment processing failure",
+  "message": "We have been unable to process customer payments since yesterday. Every transaction returns an error, and our business operations are being affected."
+}
