@@ -1,4 +1,4 @@
-# Jev Support Intelligence
+# AI-Powered Customer Support Triage & Resolution API
 
 A confidence-gated support ticket triage backend built with FastAPI, TypeSafe Jev, and SQLite. It classifies incoming tickets, assigns queues and priorities, flags uncertain decisions for human review, preserves the complete decision history, and exposes an API that other products can integrate with.
 
