@@ -2,7 +2,7 @@
 
 A confidence-gated support ticket triage backend built with FastAPI, TypeSafe Jev, and SQLite. It classifies incoming tickets, assigns queues and priorities, flags uncertain decisions for human review, preserves the complete decision history, and exposes an API that other products can integrate with.
 
-> **Project status:** Backend Phase 4 is complete. The application defaults to an offline mock evaluator. The live Jev request contract, retries, and error handling are tested with simulated HTTP responses, but the integration has not yet been exercised with a real TypeSafe API key. The customer and support-agent UI remains deliberately planned for the final phase.
+> **Project status:** Backend Phase 5 is complete. The service includes migrations, container packaging, CI, readiness checks, and integration documentation. It defaults to an offline mock evaluator; the live Jev contract is tested with simulated HTTP responses but still needs verification with a real TypeSafe key. The customer and support-agent UI remains the final phase.
 
 ## Why this project exists
 
@@ -38,6 +38,10 @@ Jev makes narrow, typed judgments. This project turns those judgments into an au
 - Per-client sliding-window rate limits and quota response headers
 - JSON request and retry logs with safe correlation IDs
 - Aggregate operations metrics and review-based confidence calibration
+- Alembic-managed, versioned database schema
+- Non-root Docker image with persistent SQLite storage and health checks
+- GitHub Actions tests, migration drift checks, and container smoke test
+- Separate liveness (`/health`) and database readiness (`/ready`) probes
 - Filtered and paginated support work queue
 - Stable error envelopes for API consumers
 - Automated unit, integration, database, and API tests
@@ -94,7 +98,10 @@ Saving first prevents a provider outage from losing the customer's request. The 
 - HTTPX
 - Pydantic and Pydantic Settings
 - SQLAlchemy async API
+- Alembic
 - aiosqlite
+- Docker and Docker Compose
+- GitHub Actions
 - pytest and pytest-asyncio
 - TypeSafe Jev System One API
 
@@ -115,8 +122,10 @@ Saving first prevents a provider outage from losing the customer's request. The 
 │   │   └── security.py
 │   ├── db/
 │   │   ├── models.py
+│   │   ├── readiness.py
 │   │   ├── repository.py
-│   │   └── session.py
+│   │   ├── session.py
+│   │   └── version.py
 │   ├── decision/
 │   │   ├── confidence.py
 │   │   ├── engine.py
@@ -129,11 +138,20 @@ Saving first prevents a provider outage from losing the customer's request. The 
 │   │   ├── rubric.py
 │   │   └── ticket_service.py
 │   └── main.py
+├── docs/                       # Configuration, deployment, and integration guides
+├── migrations/                 # Alembic environment and versioned revisions
 ├── scripts/
-│   └── smoke_test.py
+│   ├── smoke_test.py
+│   └── start.py                # Migrate then exec Uvicorn in the container
 ├── tests/
+├── .github/workflows/ci.yml
+├── Dockerfile
+├── compose.yaml
+├── alembic.ini
 ├── .env.example
+├── .env.production.example
 ├── pytest.ini
+├── requirements.lock
 └── requirements.txt
 ```
 
@@ -180,7 +198,13 @@ LOG_LEVEL=INFO
 DATABASE_URL=sqlite:///./triage.db
 ```
 
-### 4. Start the API
+### 4. Apply database migrations
+
+```powershell
+python -m alembic upgrade head
+```
+
+### 5. Start the API
 
 ```powershell
 python -m uvicorn app.main:app --reload --port 8766
@@ -191,8 +215,9 @@ Open:
 - Swagger UI: <http://127.0.0.1:8766/docs>
 - OpenAPI schema: <http://127.0.0.1:8766/openapi.json>
 - Health endpoint: <http://127.0.0.1:8766/health>
+- Readiness endpoint: <http://127.0.0.1:8766/ready>
 
-The SQLite tables are created at startup. The generated `triage.db` file is ignored by Git.
+Alembic creates and versions the SQLite schema. Application startup does not create or alter tables. The generated `triage.db` file is ignored by Git.
 
 ## Submit a persisted ticket
 
@@ -263,7 +288,8 @@ The complete response includes timestamps, confidence signals, probability distr
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/health` | Report application and evaluator status |
+| `GET` | `/health` | Lightweight process liveness; does not query SQLite |
+| `GET` | `/ready` | Verify database connectivity and expected Alembic revision |
 | `POST` | `/api/v1/triage` | Evaluate and decide without storing a ticket |
 | `GET` | `/api/v1/policy` | Show the active decision thresholds and queue map |
 | `POST` | `/api/v1/tickets` | Store and triage a new ticket |
@@ -462,6 +488,31 @@ Inbound API-key authentication and per-client quotas are implemented. The curren
 
 Developers can clone the repository, supply their own TypeSafe key, configure their own SQLite path, and run the FastAPI service themselves. The decision engine and policy can also be imported directly by Python projects.
 
+## Deployment
+
+Apply migrations before starting the API:
+
+```powershell
+python -m alembic upgrade head
+python -m uvicorn app.main:app --port 8766
+```
+
+Or run the packaged service with a persistent Docker volume:
+
+```powershell
+docker compose up --build -d
+```
+
+The container runs as a non-root user, applies pending migrations before Uvicorn starts, stores SQLite under `/data`, and exposes a health check through `/ready`. Keep one application process and one Uvicorn worker per SQLite volume.
+
+Detailed guides:
+
+- [Configuration reference](docs/CONFIGURATION.md)
+- [Deployment and migration guide](docs/DEPLOYMENT.md)
+- [API integration guide](docs/INTEGRATION.md)
+
+`requirements.txt` defines supported dependency ranges for development. `requirements.lock` pins the exact versions used by Docker and CI for reproducible builds.
+
 ## Testing
 
 Run the full test suite:
@@ -470,7 +521,7 @@ Run the full test suite:
 python -m pytest -q
 ```
 
-At the end of Phase 4, the suite contains 108 passing tests covering:
+At the end of Phase 5, the suite contains 114 passing tests covering:
 
 - exact confidence formulas;
 - decision thresholds and boundary values;
@@ -487,7 +538,10 @@ At the end of Phase 4, the suite contains 108 passing tests covering:
 - bounded provider retry and non-retryable failure behavior;
 - API-key validation and per-client quota isolation;
 - request-ID validation and log redaction;
-- analytics counts, latest-label selection, confidence buckets, and Brier score.
+- analytics counts, latest-label selection, confidence buckets, and Brier score;
+- Alembic migrations and model/schema drift checks;
+- readiness behavior for migrated and unmigrated databases;
+- container entrypoint and deployment configuration.
 
 Run the end-to-end smoke test while the API is running:
 
@@ -512,16 +566,18 @@ Implemented now:
 - per-client sliding-window quotas and retry headers;
 - safe JSON access and provider-retry logs;
 - validated or generated request correlation IDs;
-- privacy-safe aggregate analytics and calibration-label exports.
+- privacy-safe aggregate analytics and calibration-label exports;
+- Alembic-managed schema revisions and database readiness checks;
+- non-root Docker packaging with a persistent data volume;
+- CI across Python 3.12 and 3.13, including migration and container checks.
 
 Still required before public deployment:
 
 - scoped client authorization and automated key issuance, rotation, and revocation;
 - a distributed rate-limit store for multiple workers;
 - CORS rules for the future frontend;
-- database migrations with Alembic;
 - privacy and retention rules for customer ticket content;
-- deployment configuration, HTTPS, backups, and monitoring.
+- hosted HTTPS, automated backups, monitoring, and alerting.
 
 When `JEV_MODE=live`, ticket subject and message content are sent to TypeSafe for evaluation. Review the provider's current privacy and data-processing terms before using real customer data.
 
@@ -531,7 +587,8 @@ When `JEV_MODE=live`, ticket subject and message content are sent to TypeSafe fo
 - [x] Phase 2: confidence formulas, versioned policy, routing, priority, and escalation engine
 - [x] Phase 3: SQLite persistence, work queue, review history, corrections, and status lifecycle
 - [x] Phase 4: bounded retries, authentication, rate limiting, structured logging, and calibration tooling
-- [ ] Deployment: Docker, migrations, production configuration, and hosted API documentation
+- [x] Phase 5: Alembic migrations, Docker packaging, CI, readiness, and integration documentation
+- [ ] Live-provider checkpoint: verify the contract and calibrate against real Jev responses
 - [ ] Final phase: customer ticket form and support-agent dashboard
 
 ## Technical references
@@ -541,5 +598,8 @@ When `JEV_MODE=live`, ticket subject and message content are sent to TypeSafe fo
 - [Community-maintained TypeSafe developer guide](https://github.com/typesafe-docs/typesafeai), which links back to the official documentation and includes verified System One examples
 - [FastAPI documentation](https://fastapi.tiangolo.com/)
 - [SQLAlchemy asyncio documentation](https://docs.sqlalchemy.org/en/21/orm/extensions/asyncio.html)
+- [Alembic documentation](https://alembic.sqlalchemy.org/en/latest/)
+- [FastAPI container deployment](https://fastapi.tiangolo.com/deployment/docker/)
+- [GitHub Actions Python guide](https://docs.github.com/en/actions/use-cases-and-examples/building-and-testing/building-and-testing-python)
 
 Descriptions of Jev primitives and confidence behavior were rephrased for compliance with licensing restrictions.

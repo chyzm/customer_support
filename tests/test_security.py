@@ -64,3 +64,13 @@ def test_openapi_describes_api_key_security(client):
     schemes = schema["components"]["securitySchemes"]
     assert any(value.get("name") == "X-API-Key" for value in schemes.values())
     assert schema["paths"]["/api/v1/triage"]["post"]["security"]
+
+
+def test_disabled_authentication_ignores_unused_client_key_text():
+    settings = Settings(
+        _env_file=None,
+        jev_mode="mock",
+        api_auth_enabled=False,
+        client_api_keys="not-in-client-id-secret-format",
+    )
+    assert settings.api_auth_enabled is False

@@ -12,9 +12,11 @@ from app.core.config import get_settings
 from app.core.observability import configure_logging, request_observability_middleware
 from app.core.rate_limit import InMemoryRateLimiter
 from app.core.security import ApiAccessError, ApiKeyAuthenticator
-from app.db.session import create_engine, create_session_factory, init_db
+from app.db.readiness import check_database
+from app.db.session import create_engine, create_session_factory
 from app.decision.policy import DEFAULT_POLICY
 from app.services.errors import JevAuthError, JevError, JevUnavailableError
+from app.schemas.meta import ReadinessResponse
 from app.services.jev import JevClient
 from app.services.mock_jev import MockJevClient
 from app.services.ticket_service import (
@@ -34,7 +36,7 @@ async def lifespan(app: FastAPI):
     app.state.policy = DEFAULT_POLICY
     app.state.authenticator = ApiKeyAuthenticator(
         settings.api_auth_enabled,
-        settings.parsed_client_api_keys(),
+        settings.parsed_client_api_keys() if settings.api_auth_enabled else {},
     )
     app.state.rate_limiter = InMemoryRateLimiter(
         settings.rate_limit_requests,
@@ -42,7 +44,7 @@ async def lifespan(app: FastAPI):
     )
 
     engine = create_engine(settings.database_url)
-    await init_db(engine)
+    app.state.engine = engine
     app.state.session_factory = create_session_factory(engine)
 
     http: httpx.AsyncClient | None = None
@@ -63,7 +65,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AI-Powered Customer Support Triage & Resolution API",
     description="Confidence-gated ticket routing with persistence and human review.",
-    version="0.4.0",
+    version="0.5.0",
     lifespan=lifespan,
 )
 app.middleware("http")(request_observability_middleware)
@@ -144,6 +146,21 @@ async def health_check(request: Request):
         "jev_model": settings.jev_model if settings.jev_mode == "live" else "mock",
         "api_auth_enabled": settings.api_auth_enabled,
     }
+
+
+@app.get("/ready", response_model=ReadinessResponse, tags=["Meta"])
+async def readiness_check(request: Request):
+    """Report whether this instance can safely receive API traffic."""
+    result = await check_database(request.app.state.engine)
+    body = ReadinessResponse(
+        status="ready" if result.ready else "not_ready",
+        database=result.database,
+        expected_revision=result.expected_revision,
+        current_revision=result.current_revision,
+    )
+    if not result.ready:
+        return JSONResponse(status_code=503, content=body.model_dump())
+    return body
 
 
 app.include_router(router)

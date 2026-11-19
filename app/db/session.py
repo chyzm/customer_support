@@ -44,7 +44,10 @@ def create_session_factory(engine: AsyncEngine) -> async_sessionmaker:
 
 
 async def init_db(engine: AsyncEngine) -> None:
-    """Create tables that do not exist yet. Fine for a portfolio project; a
-    production system with evolving schemas would use Alembic migrations."""
+    """Create tables for isolated low-level tests only.
+
+    Application startup and deployed environments use Alembic migrations. This
+    helper remains for database unit tests that intentionally exercise metadata.
+    """
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)

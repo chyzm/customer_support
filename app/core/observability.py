@@ -47,14 +47,23 @@ class JsonFormatter(logging.Formatter):
 
 
 def configure_logging(level: str) -> None:
-    """Configure only the application logger; leave Uvicorn's logging alone."""
+    """Configure application loggers; leave Uvicorn and Alembic logging alone."""
     logger = logging.getLogger("app")
+    logger.disabled = False
     logger.handlers.clear()  # lifespan runs once per TestClient in tests
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())
     logger.addHandler(handler)
     logger.setLevel(level)
     logger.propagate = False
+
+    # Logging config loaded by migration tooling must not leave existing child
+    # loggers disabled when an app starts in the same process (as tests do).
+    for name in ("app.http", "app.jev"):
+        child = logging.getLogger(name)
+        child.disabled = False
+        child.handlers.clear()
+        child.propagate = True
 
 
 def select_request_id(value: str | None) -> str:

@@ -1,0 +1,7 @@
+Alembic migration environment for the support triage database.
+
+Create a migration after changing app/db/models.py:
+    python -m alembic revision --autogenerate -m "describe change"
+
+Review every generated operation before applying it, then update
+app/db/version.py to the new head revision.

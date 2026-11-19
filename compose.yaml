@@ -1,0 +1,25 @@
+services:
+  api:
+    build:
+      context: .
+    image: jev-support-intelligence:local
+    init: true
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: sqlite:////data/triage.db
+      PORT: "8000"
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    volumes:
+      - support-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    stop_grace_period: 20s
+
+volumes:
+  support-data:

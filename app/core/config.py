@@ -79,7 +79,7 @@ class Settings(BaseSettings):
         if self.jev_mode == "live" and not provider_key_present:
             raise ValueError("TYPESAFE_API_KEY is required when JEV_MODE=live")
 
-        parsed_keys = self.parsed_client_api_keys()
+        parsed_keys = self.parsed_client_api_keys() if self.api_auth_enabled else {}
         if self.api_auth_enabled and not parsed_keys:
             raise ValueError("CLIENT_API_KEYS is required when API_AUTH_ENABLED=true")
         # Live mode sends real customer text to a paid provider. Do not allow it
